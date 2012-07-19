@@ -43,44 +43,10 @@
     height: 1px;
     width: 100%;
   }
-  pre {
-    position: absolute;
-    left: 13px;
-    top: 13px;
-    z-index: 3;
-  }
 </style>
 <h1>Draw and Move with your Mouse</h1>
 <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
 <script>
-  // touch feature detection from modernizr.js
-  var HASTOUCH = ('ontouchstart' in window) || window.DocumentTouch && document instanceof DocumentTouch ? true : false;
-  var INPUTDOWN, INPUTMOVE, INPUTUP;
-
-  if (HASTOUCH) {
-  	INPUTDOWN = "touchstart";
-  	INPUTMOVE = "touchmove";
-  	INPUTUP = "touchend";
-  } else {
-  	INPUTDOWN = "mousedown";
-  	INPUTMOVE = "mousemove";
-  	INPUTUP = "mouseup";
-  }
-
-  function normalizedX(event){
-  	return HASTOUCH ? event.originalEvent.touches[0].pageX : event.pageX;
-  }	
-
-  function normalizedY(event){
-  	return HASTOUCH ? event.originalEvent.touches[0].pageY : event.pageY;
-  }
-  
-  /* small visuall debug console for mobile */
-  var pre = $('<pre>').appendTo($('html'));
-  function debug(){
-    pre[0].innerHTML += JSON.stringify( [].slice.call(arguments, 0) ) +"\n";
-  }
-  
   // Array Remove one occurence of the given entry
   Array.prototype.removeEntry = function(entry){
     var index = this.indexOf(entry);
@@ -102,7 +68,7 @@
       y : new Array()
     };
     
-    $(document).bind(INPUTDOWN, this.startToDraw.bind(this));
+    $(document).bind('mousedown', this.startToDraw.bind(this));
     $(document).bind('boxMoveEnd', this.chart.bind(this));
     $(document).bind('boxMoveEnd', this.removeGuides.bind(this));
   }
@@ -114,13 +80,12 @@
       box.start(event);
       this.boxes.push(box);
     
-      $(document).bind(INPUTMOVE, box.update.bind(box));
-      debug("bind", INPUTUP);
-      $(document).one(INPUTUP, this.finishDrawing.bind(this));
+      $(document).bind('mousemove', box.update.bind(box));
+      $(document).one('mouseup', this.finishDrawing.bind(this));
     },
     finishDrawing : function(event){
       this.boxes[ this.boxes.length-1 ].seal();
-      $(document).unbind(INPUTMOVE);
+      $(document).unbind('mousemove');
     },
     chart : function(){
       this.edges = { 
@@ -174,7 +139,7 @@
   
   Box.prototype = {
     start : function(event){
-      this.startPos = { x: normalizedX(event), y: normalizedY(event) };
+      this.startPos = { x: event.pageX, y: event.pageY };
       
       this.pos.x = this.startPos.x;
       this.pos.y = this.startPos.y;
@@ -186,9 +151,8 @@
       this.update(event);
     },
     update : function(event){
-      var mouseX = normalizedX(event);
-      var mouseY = normalizedY(event);
-      debug(mouseX, mouseY);
+      var mouseX = event.pageX;
+      var mouseY = event.pageY;
       
       this.width = Math.abs(mouseX - this.startPos.x);
       this.height = Math.abs(mouseY - this.startPos.y);
@@ -216,19 +180,18 @@
       this.el.addClass('selected').siblings().removeClass('selected');
     },
     seal : function(){
-      debug("seal - bind", INPUTDOWN);
-      this.el.bind(INPUTDOWN, this.startToDrag.bind(this));
+      this.el.bind('mousedown', this.startToDrag.bind(this));
       $(document).trigger('boxMoveEnd');
     },
     startToDrag : function(event){
       event.stopPropagation();
       this.mouseOffset = {
-        x : normalizedX(event) - this.el.offset().left,
-        y : normalizedY(event) - this.el.offset().top
+        x : event.pageX - this.el.offset().left,
+        y : event.pageY - this.el.offset().top
       };
       
-      $(document).bind(INPUTMOVE, this.drag.bind(this));
-      $(document).bind(INPUTUP, this.stopToDrag);
+      $(document).bind('mousemove', this.drag.bind(this));
+      $(document).bind('mouseup', this.stopToDrag);
       
       this.removeBoxEdgesFromGuideSet('x');
       this.removeBoxEdgesFromGuideSet('y');
@@ -237,19 +200,16 @@
       this.select();
       this.drag(event);
     },
-    drag : function(event){
-      var mouseX = normalizedX(event);
-      var mouseY = normalizedY(event);
-      
-      this.pos.x = mouseX - this.mouseOffset.x;
-      this.pos.y = mouseY - this.mouseOffset.y;
+    drag : function(event){      
+      this.pos.x = event.pageX - this.mouseOffset.x;
+      this.pos.y = event.pageY - this.mouseOffset.y;
       
       this.snapToGuides();
       
       this.el.css({ left: this.pos.x, top: this.pos.y });
     },
     stopToDrag : function(event){
-      $(document).unbind(INPUTMOVE);
+      $(document).unbind('mousemove');
       $(document).trigger('boxMoveEnd');
     },
     snapToGuides : function(resizing){
