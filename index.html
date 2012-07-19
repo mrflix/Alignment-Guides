@@ -63,10 +63,7 @@
   function drawArea(){
     this.boxes = new Array();
     this.snapTreshhold = 5;
-    this.edges = { 
-      x : new Array(),
-      y : new Array()
-    };
+    this.resetEdges();
     
     $(document).bind('mousedown', this.startToDraw.bind(this));
     $(document).bind('boxMoveEnd', this.chart.bind(this));
@@ -87,11 +84,14 @@
       this.boxes[ this.boxes.length-1 ].seal();
       $(document).unbind('mousemove');
     },
-    chart : function(){
+    resetEdges : function(){
       this.edges = { 
-        x : new Array(),
-        y : new Array()
+        x : [ Math.round($(document).width()/2) ],
+        y : [ Math.round($(document).height()/2) ]
       };
+    },
+    chart : function(){
+      this.resetEdges();
       
       for(var i=0; i<this.boxes.length; i++){
         var box = this.boxes[i];
@@ -225,12 +225,6 @@
       this.parent.edges[direction].removeEntry( position + Math.round(this[side]/2) );
       this.parent.edges[direction].removeEntry( position + this[side] );
     },
-    /*
-      snap
-      ====
-      
-      TODO: - differentiate between drag and resize - for resize we have to adopt width and height
-    */
     snap : function(direction, resizing){
       var side = direction === 'x' ? 'width' : 'height';
       
@@ -248,16 +242,16 @@
         }
         else if(Math.abs(centerDistance - position) <= this.parent.snapTreshhold){
           if(resizing)
-            this[side] = Math.round(Math.abs(position - distance)*2);
+            this[side] = Math.round(Math.abs(position - distance)*2); // resize snap behavior 
           else
-            this.pos[direction] = position - halfSideLength;
+            this.pos[direction] = position - halfSideLength; // move snap behavior 
           setGuide = true;
         }
         else if(Math.abs(endDistance - position) <= this.parent.snapTreshhold){
           if(resizing)
-            this[side] = Math.abs(position - distance);
+            this[side] = Math.abs(position - distance); // resize snap behavior 
           else
-            this.pos[direction] = position - this[side];
+            this.pos[direction] = position - this[side]; // move snap behavior 
           setGuide = true;
         }
         
