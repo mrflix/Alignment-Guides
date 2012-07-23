@@ -2,6 +2,11 @@
 <title>Alignment Guides</title>
 <style>
   html {
+    height: 100%;
+    font-family: sans-serif;
+    color: #333;
+    text-shadow: 0 1px white;
+    overflow: hidden;
     -webkit-user-select: none;
        -moz-user-select: none;
         -ms-user-select: none;
@@ -30,22 +35,99 @@
     top: 0;
     position: absolute;
     background: hsl(205,100%,75%);
+    color: hsl(205,100%,75%);
     z-index: 2;
   }
   .guide.static {
-    background: rgba(0,0,0,0);
+    background: rgba(0,0,0,0.13);
+    display: none;
   }
-  .guide.direction-x {
+  .debug .guide.static {
+    display: block;
+  }
+  .guide.axis-x {
     height: 100%;
     width: 1px;
   }
-  .guide.direction-y {
+  .guide.axis-y {
     height: 1px;
     width: 100%;
   }
+  .distance .label {
+    font-size: 10px;
+    line-height: 10px;
+    font-family: sans-serif;
+  }
+  .distance.axis-x { height: 1px; margin: 0 5px; }
+  .distance.axis-y { width: 1px; margin: 5px 0; }
+  .distance.axis-x .label {
+    text-align: center;
+    margin-top: -12px;
+  }
+  .distance.axis-y .label {
+    position: absolute;
+    top: 50%;
+    margin-left: 4px;
+    margin-top: -5px;
+  }
+  .distance:after,
+  .distance:before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    top: -4px;
+    height: 9px;
+    width: 1px;
+    background: inherit;
+  }
+  .distance:after {
+    left: auto;
+    right: -1px;
+  }
+  .distance.axis-y:after,
+  .distance.axis-y:before {
+    left: -4px;
+    top: -1px;
+    width: 9px;
+    height: 1px;
+  }
+  .distance.axis-y:after {
+    top: auto;
+    bottom: -1px;
+  }
+  .controls {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    font-size: 13px;
+    background: -webkit-linear-gradient(hsl(205,8%,95%), hsl(205,8%,90%));
+    box-shadow: 
+      0 -1px hsl(205,8%,80%) inset,
+      0 -1px 3px hsl(205,8%,83%) inset;
+  }
+    .controls > div {
+      padding: 8px 13px 7px;
+    }
+  .container {
+    position: absolute;
+    top: 32px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
 </style>
 <h1>Draw and Move with your Mouse</h1>
-<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+<div class="controls">
+  <div>
+    <input type="checkbox" id="debug">
+    <label for="debug">Debug</label>
+  </div>
+</div>
+<div class="container"></div>
+<!--<div class="distance guide axis-y" style="left: 50%; top: 30px; width: 100px;"><div class="label">100px</div></div>-->
+<script type="text/javascript" src="js/zepto.min.js"></script>
+<script type="text/javascript" src="js/keymaster.min.js"></script>
 <script>
   // Array Remove one occurence of the given entry
   Array.prototype.removeEntry = function(entry){
@@ -60,14 +142,48 @@
     return this.push.apply(this, rest);
   };
   
-  function drawArea(){
+  /*
+    DEBUG
+    =====
+    
+  */ 
+  
+  $('.controls').bind('mousedown', function(event){ event.stopPropagation(); });
+  $('#debug').change(function(event){ 
+    $('html').toggleClass('debug');
+    localStorage['alignmentGuidesDebug'] = this.checked;
+  });
+  
+  if(localStorage['alignmentGuidesDebug']){
+    var shouldDebug = JSON.parse(localStorage['alignmentGuidesDebug']);
+    $('#debug').attr('checked', shouldDebug);
+    if(shouldDebug)
+      $('html').addClass('debug');
+  }
+  
+  /*
+    Draw Area
+    =========
+    
+  */
+  
+  function drawArea(element){
+    this.element = element;
     this.boxes = new Array();
     this.snapTreshhold = 5;
+    this.minimumDistance = 10;
+    this.offset = this.element.offset();
+    this.staticGuides = {
+      x : [ 0, Math.round(this.element.width()/2), this.element.width() ],
+      y : [ 0, Math.round(this.element.height()/2), this.element.height() ]
+    };
+    
+    key('up, right, down, left', this.handleKey.bind(this));
     this.resetEdges();
     
-    $(document).bind('mousedown', this.startToDraw.bind(this));
-    $(document).bind('boxMoveEnd', this.chart.bind(this));
-    $(document).bind('boxMoveEnd', this.removeGuides.bind(this));
+    this.element.bind('mousedown', this.startToDraw.bind(this));
+    this.element.bind('boxMoveEnd', this.chart.bind(this));
+    this.element.bind('boxMoveEnd', this.removeGuides.bind(this));
   }
   
   drawArea.prototype = {
@@ -77,189 +193,425 @@
       box.start(event);
       this.boxes.push(box);
     
-      $(document).bind('mousemove', box.update.bind(box));
+      $(document).bind('mousemove', box.resize.bind(box));
       $(document).one('mouseup', this.finishDrawing.bind(this));
     },
     finishDrawing : function(event){
       this.boxes[ this.boxes.length-1 ].seal();
       $(document).unbind('mousemove');
     },
+    handleKey : function(event, handler){
+      if(this.selected){
+        switch(handler.shortcut){
+          case 'up': 
+            this.selected.move(0, -1);
+            break;
+          case 'right':
+            this.selected.move(1, 0);
+            break;
+          case 'down':
+            this.selected.move(0, 1);
+            break;
+          case 'left':
+            this.selected.move(-1, 0);
+            break;
+        }
+      }
+    },
     resetEdges : function(){
+      // .slice() to only copy them - otherwise a reference would get created
       this.edges = { 
-        x : [ Math.round($(document).width()/2) ],
-        y : [ Math.round($(document).height()/2) ]
+        x : this.staticGuides.x.slice(),
+        y : this.staticGuides.y.slice()
       };
     },
+    /*
+      TODO:
+      
+      - chart dimensions (width, height)
+      
+    */
     chart : function(){
       this.resetEdges();
+      this.distances = new Object();
       
       for(var i=0; i<this.boxes.length; i++){
         var box = this.boxes[i];
+        var interestPoints = box.getInterestPoints();
         
-        this.edges.x.push(box.pos.x, box.pos.x + Math.round(box.width/2), box.pos.x + box.width);
-        this.edges.y.push(box.pos.y, box.pos.y + Math.round(box.height/2), box.pos.y + box.height);
+        // add the interestPoints arrays to the end of the edges array
+        // trick from http://stackoverflow.com/questions/5080028/what-is-the-most-efficient-way-to-concatenate-n-arrays-in-javascript
+        this.edges.x.push.apply(this.edges.x, interestPoints.x);
+        this.edges.y.push.apply(this.edges.y, interestPoints.y);
       }
+      
+      this.chartDistances();
       
       this.showAllGuides();
     },
-    removeGuides : function(){
-      $('.guide:not(.static)').remove();
+    chartDistances : function(){
+      for(var i=0, l=this.boxes.length; i<l; i++){
+        var boxA = this.boxes[i];
+        
+        for(var j=0; j<l; j++){
+          var boxB = this.boxes[j];
+          if(i !== j){
+            var distanceX = boxB.left - boxA.right;
+            var distanceY = boxB.top - boxA.bottom;
+            
+            if(distanceX > this.minimumDistance)
+              this.addDistance('x', distanceX, boxA, boxB);
+              
+            if(distanceY > this.minimumDistance)
+              this.addDistance('y', distanceY, boxA, boxB);
+          }
+        }
+      }
     },
-    addGuide : function(direction, position, additionalClass){
-      var className = 'direction-' + direction;
+    addDistance : function(axis, distance, boxA, boxB){
+      var start = axis === 'x' ? 'right' : 'bottom';
+      var end = axis === 'x' ? 'left' : 'top';
+      
+      if(this.distances[distance] === undefined)
+        this.distances[distance] = new Array();
+      this.distances[distance].push({
+        axis : axis,
+        boxA : boxA,
+        boxB : boxB
+      });
+    },
+    renderDistance : function(axis, distance, boxA, boxB){
+      var css;
+      
+      if(axis === 'x'){
+        var boxWithSmallerHeight = boxA.height < boxB.height ? boxA : boxB;
+        
+        css = {
+          top : boxWithSmallerHeight.y + Math.round(boxWithSmallerHeight.height/2),
+          left : boxA.right,
+          width : distance - 10
+        };
+        
+      } else {
+        var boxWithSmallerWidth = boxA.width < boxB.width ? boxA : boxB;
+        
+        css = {
+          top : boxA.bottom,
+          left : boxWithSmallerSide.x + Math.round(boxWithSmallerSide.width/2),
+          height : distance - 10
+        };
+      }
+      
+      this.element.append( 
+        $('<div class="distance guide">')
+          .addClass('axis-' + axis)
+          .css(css)
+          .append( $('<div class="label">').text(distance + "px") )
+      );
+    },
+    drawStaticDistances : function(){
+      for(distance in this.distances){
+        for(var i=0; i<this.distances[distance].length; i++){
+          var gap = this.distances[distance][i];
+          this.renderDistance(gap.axis, distance, gap.boxA, gap.boxB);
+        }
+      }
+    },
+    removeGuides : function(){
+      this.element.find('.guide:not(.static)').remove();
+    },
+    renderGuide : function(axis, position, additionalClass){
+      var className = 'axis-' + axis;
       if(additionalClass) className += " " + additionalClass;
       
-      $('html').append( 
+      this.element.append( 
         $('<div class="guide">')
           .addClass(className)
-          .css(direction === 'x' ? 'left' : 'top', position)
+          .css(axis === 'x' ? 'left' : 'top', position)
       );
     },
     showAllGuides : function(){
-      $('.guide.static').remove();
+      this.element.find('.guide.static').remove();
       this.drawStaticGuides('x');
       this.drawStaticGuides('y');
+      //this.drawStaticDistances();
     },
-    drawStaticGuides : function(direction){
-      for(var i=0; i<this.edges[direction].length; i++){
-        this.addGuide(direction, this.edges[direction][i], 'static');
+    drawStaticGuides : function(axis){
+      for(var i=0; i<this.edges[axis].length; i++){
+        this.renderGuide(axis, this.edges[axis][i], 'static');
       }
+    },
+    remove : function(box){
+      for(var i=0; i<this.boxes.length; i++){
+        if(this.boxes[i].is(box)){
+          box.element.remove();
+          this.boxes.remove(i);
+        }
+      }
+    },
+    select : function(box){
+      if(this.selected){
+        this.selected.element.removeClass('selected');
+      }
+      this.selected = box;
+      this.selected.element.addClass('selected');
     }
   };
   
   
   function Box(parent){
     this.parent = parent;
-    this.pos = {
-      x : 0,
-      y : 0
-    };
-    this.el = $('<div class="box">');
+    this.x = 0;
+    this.y = 0;
+    this.minSize = 10;
+    
+    this.element = $('<div class="box">');
   }
   
   Box.prototype = {
     start : function(event){
-      this.startPos = { x: event.pageX, y: event.pageY };
+      this.x = this.startX = event.pageX - this.parent.offset.left;
+      this.y = this.startY = event.pageY - this.parent.offset.top;
       
-      this.pos.x = this.startPos.x;
-      this.pos.y = this.startPos.y;
+      this.parent.element.append(this.element);
       
-      this.el.css({ left: this.pos.x, top: this.pos.y });
-      $('html').append(this.el);
-      
-      this.select();
-      this.update(event);
+      this.parent.select(this);
+      this.resize(event);
     },
-    update : function(event){
-      var mouseX = event.pageX;
-      var mouseY = event.pageY;
+    resize : function(event){
+      var mouseX = event.pageX - this.parent.offset.left;
+      var mouseY = event.pageY - this.parent.offset.top;
       
-      this.width = Math.abs(mouseX - this.startPos.x);
-      this.height = Math.abs(mouseY - this.startPos.y);
+      this.width = Math.abs(mouseX - this.startX);
+      this.height = Math.abs(mouseY - this.startY);
       
-      if(mouseX < this.startPos.x)
-        this.pos.x = mouseX;
+      if(mouseX < this.startX)
+        this.x = mouseX;
       else
-        this.pos.x = this.startPos.x;
+        this.x = this.startX;
       
-      if(mouseY < this.startPos.y)
-        this.pos.y = mouseY;
+      if(mouseY < this.startY)
+        this.y = mouseY;
       else
-        this.pos.y = this.startPos.y;
+        this.y = this.startY;
         
-      this.snapToGuides(true);
+      // lock width/height ratio to 1:1 on SHIFT key
+      if(event.shiftKey){
+        if(this.height < this.width)
+          this.width = this.height;
+        else
+          this.height = this.width;
+      }
+
+      // resize from the center of the box
+      if(event.altKey){
+        this.x -= this.width;
+        this.y -= this.height;
+        this.width *= 2;
+        this.height *= 2;
+      }
+        
+      this.snapToGuides({ resize : true });
       
-      this.el.css({
-        left: this.pos.x,
-        top: this.pos.y,
+      this.redraw();
+    },
+    seal : function(){
+      if(this.width > this.minSize || this.height > this.minSize){
+        
+        this.element.bind('mousedown', this.startToDrag.bind(this));
+        this.parent.element.trigger('boxMoveEnd');
+        
+      } else {
+        this.parent.remove(this);
+      }
+    },
+    is : function(box){
+      return this.x === box.x && this.y === box.y && this.width === box.width && this.height === box.height;
+    },
+    move : function(x, y){
+      this.x += x;
+      this.y += y;
+      this.redraw();
+    },
+    redraw : function(){
+      this.element.css({
+        left: this.x,
+        top: this.y,
         width: this.width,
         height: this.height
       });
     },
-    select : function(){
-      this.el.addClass('selected').siblings().removeClass('selected');
-    },
-    seal : function(){
-      this.el.bind('mousedown', this.startToDrag.bind(this));
-      $(document).trigger('boxMoveEnd');
-    },
     startToDrag : function(event){
       event.stopPropagation();
-      this.mouseOffset = {
-        x : event.pageX - this.el.offset().left,
-        y : event.pageY - this.el.offset().top
-      };
+      this.mouseOffsetX = event.pageX - this.element.offset().left;
+      this.mouseOffsetY = event.pageY - this.element.offset().top;
+      
+      this.startX = this.x + this.mouseOffsetX;
+      this.startY = this.y + this.mouseOffsetY;
       
       $(document).bind('mousemove', this.drag.bind(this));
-      $(document).bind('mouseup', this.stopToDrag);
+      $(document).bind('mousemove', this.drag.bind(this));
+      $(document).bind('mouseup', this.stopToDrag.bind(this));
       
-      this.removeBoxEdgesFromGuideSet('x');
-      this.removeBoxEdgesFromGuideSet('y');
+      this.excludeBoxformEdges();
+      this.excludeBoxFromDistances();
       this.parent.showAllGuides();
       
-      this.select();
+      this.parent.select(this);
       this.drag(event);
     },
-    drag : function(event){      
-      this.pos.x = event.pageX - this.mouseOffset.x;
-      this.pos.y = event.pageY - this.mouseOffset.y;
+    drag : function(event){
+      this.x = event.pageX - this.parent.offset.left - this.mouseOffsetX;
+      this.y = event.pageY - this.parent.offset.top - this.mouseOffsetY;
+      
+      // lock one axis
+      if(event.shiftKey){
+        if(!this.lockedAxis){
+    			var relativeX = this.x - this.startX;
+    			var relativeY = this.y - this.startY;
+    			var absX = Math.abs(relativeX);
+    			var absY = Math.abs(relativeY);
+    			if(relativeY >= absX || relativeY <= -absX){
+    				// vertical lock
+    				this.lockedAxis = 'x';
+    			}
+    			else if(relativeX > absY || relativeX < -absY){
+    				// horizontal lock
+    				this.lockedAxis = 'y';
+    			}
+  			}
+      } else {
+        this.lockedAxis = null;
+      }
+      
+      if(this.lockedAxis === 'x')
+				this.x = this.startX - this.mouseOffsetX;
+      if(this.lockedAxis === 'y')  
+				this.y = this.startY - this.mouseOffsetY;
       
       this.snapToGuides();
       
-      this.el.css({ left: this.pos.x, top: this.pos.y });
+      this.redraw();
     },
     stopToDrag : function(event){
       $(document).unbind('mousemove');
-      $(document).trigger('boxMoveEnd');
+      this.parent.element.trigger('boxMoveEnd');
+      this.lockedAxis = null;
     },
-    snapToGuides : function(resizing){
+    snapToGuides : function(options){
+      var resize = options ? options.resize : false;
       this.parent.removeGuides();
-      this.snap('x', resizing);
-      this.snap('y', resizing);
+      this.snap({ resize: resize, axis: 'x'});
+      this.snap({ resize: resize, axis: 'y'});
+      this.snapToDistances(options);
     },
-    removeBoxEdgesFromGuideSet : function(direction){
-      var side = direction === 'x' ? 'width' : 'height';
-      var position = this.pos[direction];
-      
-      this.parent.edges[direction].removeEntry( position );
-      this.parent.edges[direction].removeEntry( position + Math.round(this[side]/2) );
-      this.parent.edges[direction].removeEntry( position + this[side] );
+    excludeBoxFromDistances : function(){
+      for(distance in this.parent.distances){
+        var gaps = this.parent.distances[distance];
+        
+        for(var i=0; i<gaps.length; i++){
+          var gap = gaps[i];
+          if(this.is(gap.boxA) || this.is(gap.boxB))
+            gaps.remove(i--);
+        }
+        
+        if(gaps.length === 0)
+          delete this.parent.distances[distance];
+      }
     },
-    snap : function(direction, resizing){
-      var side = direction === 'x' ? 'width' : 'height';
+    excludeBoxformEdges : function(){
+      this.parent.edges.x.removeEntry( this.x );
+      this.parent.edges.x.removeEntry( this.x + Math.round(this.width/2) );
+      this.parent.edges.x.removeEntry( this.right );
       
-      for(var i=0; i<this.parent.edges[direction].length; i++){
-        var position = this.parent.edges[direction][i];
-        var distance = this.pos[direction];
+      this.parent.edges.y.removeEntry( this.y );
+      this.parent.edges.y.removeEntry( this.y + Math.round(this.height/2) );
+      this.parent.edges.y.removeEntry( this.bottom );
+    },
+    snapToDistances : function(options){
+      
+    },
+    /*
+      TODO: 
+        - snap to same distances
+          -> aka meassure the distance to every interest point and 
+             from every interest point to another (this can be done before) 
+             and compare if some are the same and also visualy highlight all of them
+        - respect 1:1 ratio
+    */
+    snap : function(options){
+      var axis = options.axis;
+      var side = axis === 'x' ? 'width' : 'height';
+      var start = axis === 'x' ? 'left' : 'top';
+      var end = axis === 'x' ? 'right' : 'bottom';
+      
+      for(var i=0; i<this.parent.edges[axis].length; i++){
+        var position = this.parent.edges[axis][i];
+        var distance = this[axis];
         var halfSideLength = Math.abs(this[side]/2);
-        var centerDistance = distance + halfSideLength;
+        var center = distance + halfSideLength;
         var endDistance = distance + this[side];
         var setGuide = false;
         
         if(Math.abs(distance - position) <= this.parent.snapTreshhold){
-          this.pos[direction] = position;
+          this[axis] = position;
           setGuide = true;
         }
-        else if(Math.abs(centerDistance - position) <= this.parent.snapTreshhold){
-          if(resizing)
+        else if(Math.abs(center - position) <= this.parent.snapTreshhold){
+          if(options.resize)
             this[side] = Math.round(Math.abs(position - distance)*2); // resize snap behavior 
           else
-            this.pos[direction] = position - halfSideLength; // move snap behavior 
+            this[axis] = position - halfSideLength; // move snap behavior 
           setGuide = true;
         }
         else if(Math.abs(endDistance - position) <= this.parent.snapTreshhold){
-          if(resizing)
+          if(options.resize)
             this[side] = Math.abs(position - distance); // resize snap behavior 
           else
-            this.pos[direction] = position - this[side]; // move snap behavior 
+            this[axis] = position - this[side]; // move snap behavior 
           setGuide = true;
         }
         
         if(setGuide)
-          this.parent.addGuide(direction, position);
+          this.parent.renderGuide(axis, position);
       }
-    }
+    },
+    getInterestPoints : function(){
+      return {
+        x : [ this.x, this.x + Math.round(this.width/2), this.right ],
+        y : [ this.y, this.y + Math.round(this.height/2), this.bottom ]
+      };
+    },
+    
+    /* getters and setters for easier to read values (top, right, bottom, left instead left+width etc.) */
+    get top(){ return this.y },
+    set top(value){ this.y = value },
+    
+    get right(){ return this.x + this.width },
+    set right(value){ this.width = value - this.x },
+    
+    get bottom(){ return this.y + this.height },
+    set bottom(value){ this.height = value - this.y },
+    
+    get left(){ return this.x },
+    set left(value){ this.x = value },
   };
   
-  area = new drawArea();
+  area = new drawArea($('.container'));
+  
+  /*
+    Changelog
+    =========
+    
+    TODO:
+      - dimension guides
+      - distance guides
+    
+    v1.1
+      - SHIFT key support: stay on axis when pressing SHIFT while dragging/resizing
+      - container center axis as default axis
+      
+    v1.0
+      - edge gudes
+  */
 </script>
